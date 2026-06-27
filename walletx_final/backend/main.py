@@ -46,4 +46,8 @@ app.include_router(admin.router)
 
 @app.get("/health", tags=["System"])
 def health():
-    return {"status": "ok", "app": settings.APP_NAME}
+    return {
+        "status": "ok",
+        "app": settings.APP_NAME,
+        "cors": settings.CORS_ORIGINS
+    }
