@@ -21,6 +21,8 @@ def register(payload: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login/request-otp")
+def request_otp(...):
+    ...
 @limiter.limit("5/minute")
 def request_otp(request: Request, payload: OTPRequest, db: Session = Depends(get_db)):
     user = user_service.authenticate(db, payload.email, payload.password)
