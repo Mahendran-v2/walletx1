@@ -72,8 +72,7 @@ class Settings:
             fatal.append("SECRET_KEY must be at least 32 characters")
         if not os.getenv("SECRET_KEY"):
             warnings.append("SECRET_KEY not set — JWTs invalidated on every restart")
-        if not self.SMTP_USER:
-            warnings.append("SMTP_USER not set — OTPs will only print to console, not emailed")
+      
 
         for w in warnings:
             print(f"[WARNING] {w}", file=sys.stderr)

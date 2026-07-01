@@ -1,157 +1,75 @@
 from __future__ import annotations
+
 import hashlib
 import hmac
 import secrets
-import smtplib
-from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
+import resend
 
-from fastapi import HTTPException, status
+from datetime import datetime, timedelta, timezone
+
+from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from core.config import get_settings
+from models.entities import OTPCode, User
 from core.config import get_settings
 from models.entities import OTPCode, User
 
 settings = get_settings()
 MAX_ATTEMPTS = 5
 
-
-# FIX #1: secrets instead of random
-def _generate_code() -> str:
-    return "".join(secrets.choice("0123456789") for _ in range(6))
-
-
-def _hash_code(code: str) -> str:
-    return hashlib.sha256(code.encode()).hexdigest()
-
-
 def _send_email(to: str, code: str, name: str) -> None:
-    if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
-        if settings.ENV == "production":
-            raise HTTPException(status_code=503, detail="Email service not configured")
-        print(f"\n[DEV OTP] Email not configured — code for {to}: {code}\n", flush=True)
-        return
+    if not settings.RESEND_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="RESEND_API_KEY is not configured",
+        )
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Your WalletX code: {code}"
-    msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
-    msg["To"] = to
+    resend.api_key = settings.RESEND_API_KEY
 
     html = f"""
-    <div style="font-family:Inter,sans-serif;max-width:480px;margin:0 auto;background:#0A0F1E;color:#F8FAFC;padding:40px;border-radius:16px">
-      <h2 style="color:#6366F1">WalletX</h2>
-      <p>Hi {name}, your login code is:</p>
-      <div style="font-size:48px;font-weight:700;letter-spacing:12px;color:#fff;margin:24px 0">{code}</div>
-      <p style="color:#94A3B8">Expires in {settings.OTP_EXPIRE_MINUTES} minutes. Do not share this code.</p>
-    </div>"""
+    <div style="font-family:Arial,sans-serif;max-width:500px;margin:auto;padding:30px">
+        <h2 style="color:#4F46E5;">WalletX</h2>
 
-    msg.attach(MIMEText(f"Your WalletX OTP: {code}", "plain"))
-    msg.attach(MIMEText(html, "html"))
+        <p>Hello <strong>{name}</strong>,</p>
+
+        <p>Your WalletX verification code is:</p>
+
+        <div style="
+            font-size:42px;
+            font-weight:bold;
+            letter-spacing:8px;
+            margin:25px 0;
+        ">
+            {code}
+        </div>
+
+        <p>This code expires in {settings.OTP_EXPIRE_MINUTES} minutes.</p>
+
+        <p>Please do not share this code with anyone.</p>
+    </div>
+    """
 
     try:
-        print("=" * 60)
-        print(f"SMTP_HOST = {settings.SMTP_HOST}")
-        print(f"SMTP_PORT = {settings.SMTP_PORT}")
-        print(f"SMTP_USER = {settings.SMTP_USER}")
-        print(f"SMTP_FROM = {settings.SMTP_FROM}")
-        print("=" * 60)
-
-        print("Connecting...")
-        smtp = smtplib.SMTP(
-            settings.SMTP_HOST,
-            settings.SMTP_PORT,
-            timeout=20
+        response = resend.Emails.send(
+            {
+                "from": "WalletX <onboarding@resend.dev>",
+                "to": [to],
+                "subject": "Your WalletX OTP",
+                "html": html,
+            }
         )
 
-        print("Connected")
-
-        smtp.set_debuglevel(1)
-
-        print("EHLO")
-        smtp.ehlo()
-
-        print("STARTTLS")
-        smtp.starttls()
-
-        print("EHLO Again")
-        smtp.ehlo()
-
-        print("Logging In")
-        smtp.login(
-            settings.SMTP_USER,
-            settings.SMTP_PASSWORD
-        )
-
-        print("Sending Mail")
-        smtp.sendmail(
-            msg["From"],
-            [to],
-            msg.as_string()
-        )
-
-        print("Email Sent")
-        smtp.quit()
+        print("Resend Response:", response)
 
     except Exception as e:
         import traceback
         traceback.print_exc()
-        print("SMTP ERROR:", repr(e))
+
+        print("RESEND ERROR:", repr(e))
+
         raise HTTPException(
             status_code=503,
-            detail=f"Email delivery failed: {e}"
+            detail=f"Email delivery failed: {e}",
         )
-
-
-def issue_otp(db: Session, user: User) -> None:
-    # Invalidate old unused codes
-    old = db.scalars(select(OTPCode).where(
-        OTPCode.user_id == user.id,
-        OTPCode.is_used == False,
-        OTPCode.purpose == "login",
-    )).all()
-    for o in old:
-        o.is_used = True
-
-    code = _generate_code()
-    otp = OTPCode(
-        user_id=user.id,
-        code_hash=_hash_code(code),
-        purpose="login",
-        expires_at=datetime.now(timezone.utc) + timedelta(minutes=settings.OTP_EXPIRE_MINUTES),
-    )
-    db.add(otp)
-    db.commit()
-    _send_email(user.email, code, user.name)
-
-
-def verify_otp(db: Session, user: User, code: str) -> None:
-    otp = db.scalar(
-        select(OTPCode)
-        .where(OTPCode.user_id == user.id, OTPCode.is_used == False, OTPCode.purpose == "login")
-        .order_by(OTPCode.created_at.desc())
-    )
-
-    if otp is None:
-        raise HTTPException(status_code=400, detail="No active OTP. Request a new one.")
-
-    if datetime.now(timezone.utc) > otp.expires_at:
-        otp.is_used = True
-        db.commit()
-        raise HTTPException(status_code=400, detail="OTP expired. Request a new one.")
-
-    if otp.attempts >= MAX_ATTEMPTS:
-        otp.is_used = True
-        db.commit()
-        raise HTTPException(status_code=400, detail="Too many attempts. Request a new OTP.")
-
-    # FIX #3: timing-safe comparison
-    if not hmac.compare_digest(otp.code_hash, _hash_code(code)):
-        otp.attempts += 1
-        db.commit()
-        remaining = MAX_ATTEMPTS - otp.attempts
-        raise HTTPException(status_code=400, detail=f"Wrong code. {remaining} attempts left.")
-
-    otp.is_used = True
-    db.commit()
