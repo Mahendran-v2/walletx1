@@ -2,10 +2,9 @@ from __future__ import annotations
 import hashlib
 import hmac
 import secrets
-import smtplib
+import resend
+
 from datetime import datetime, timedelta, timezone
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -28,35 +27,53 @@ def _hash_code(code: str) -> str:
 
 
 def _send_email(to: str, code: str, name: str) -> None:
-    if not settings.SMTP_USER or not settings.SMTP_PASSWORD:
-        if settings.ENV == "production":
-            raise HTTPException(status_code=503, detail="Email service not configured")
-        print(f"\n[DEV OTP] Email not configured — code for {to}: {code}\n", flush=True)
-        return
+    if not settings.RESEND_API_KEY:
+        raise HTTPException(
+            status_code=503,
+            detail="RESEND_API_KEY is not configured",
+        )
 
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = f"Your WalletX code: {code}"
-    msg["From"] = settings.SMTP_FROM or settings.SMTP_USER
-    msg["To"] = to
+    resend.api_key = settings.RESEND_API_KEY
 
     html = f"""
-    <div style="font-family:Inter,sans-serif;max-width:480px;margin:0 auto;background:#0A0F1E;color:#F8FAFC;padding:40px;border-radius:16px">
-      <h2 style="color:#6366F1">WalletX</h2>
-      <p>Hi {name}, your login code is:</p>
-      <div style="font-size:48px;font-weight:700;letter-spacing:12px;color:#fff;margin:24px 0">{code}</div>
-      <p style="color:#94A3B8">Expires in {settings.OTP_EXPIRE_MINUTES} minutes. Do not share this code.</p>
-    </div>"""
+    <div style="font-family:Arial,sans-serif;max-width:500px;margin:auto;padding:30px">
+        <h2 style="color:#4F46E5;">WalletX</h2>
 
-    msg.attach(MIMEText(f"Your WalletX OTP: {code}", "plain"))
-    msg.attach(MIMEText(html, "html"))
+        <p>Hello <strong>{name}</strong>,</p>
+
+        <p>Your WalletX verification code is:</p>
+
+        <div style="
+            font-size:42px;
+            font-weight:bold;
+            letter-spacing:8px;
+            margin:25px 0;
+        ">
+            {code}
+        </div>
+
+        <p>This code expires in {settings.OTP_EXPIRE_MINUTES} minutes.</p>
+
+        <p>Please do not share this code with anyone.</p>
+    </div>
+    """
 
     try:
-        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as s:
-            s.starttls()
-            s.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
-            s.sendmail(msg["From"], [to], msg.as_string())
+        resend.Emails.send(
+            {
+                "from": "WalletX <onboarding@resend.dev>",
+                "to": [to],
+                "subject": "Your WalletX OTP",
+                "html": html,
+            }
+        )
+
     except Exception as e:
-        raise HTTPException(status_code=503, detail=f"Email delivery failed: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail=f"Email delivery failed: {e}",
+        )
+    
 
 
 def issue_otp(db: Session, user: User) -> None:

@@ -22,11 +22,7 @@ class Settings:
     ALGORITHM: str
     ACCESS_TOKEN_EXPIRE_MINUTES: int
     OTP_EXPIRE_MINUTES: int
-    SMTP_HOST: str
-    SMTP_PORT: int
-    SMTP_USER: str
-    SMTP_PASSWORD: str
-    SMTP_FROM: str
+    RESEND_API_KEY: str
     FRAUD_AMOUNT_THRESHOLD: int
     FRAUD_RATE_LIMIT: int
     FRAUD_AVG_MULTIPLIER: int
@@ -40,11 +36,7 @@ class Settings:
         self.ALGORITHM = os.getenv("ALGORITHM", "HS256")
         self.ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
         self.OTP_EXPIRE_MINUTES = int(os.getenv("OTP_EXPIRE_MINUTES", "10"))
-        self.SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-        self.SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-        self.SMTP_USER = os.getenv("SMTP_USER", "")
-        self.SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
-        self.SMTP_FROM = os.getenv("SMTP_FROM", "")
+        self.RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
         self.FRAUD_AMOUNT_THRESHOLD = int(os.getenv("FRAUD_AMOUNT_THRESHOLD", "10000"))
         self.FRAUD_RATE_LIMIT = int(os.getenv("FRAUD_RATE_LIMIT", "3"))
         self.FRAUD_AVG_MULTIPLIER = int(os.getenv("FRAUD_AVG_MULTIPLIER", "3"))
